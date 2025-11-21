@@ -1,0 +1,426 @@
+---
+title: "HDS 5310 Final Project"
+output:
+  html_document:
+    df_print: paged
+---
+
+-------------------------------
+##### PROLOG #######
+# Final Project
+# Group 2
+# Maternal Mortality Rate in the United States
+# HDS 5310
+# Deena Rakshitha Borelli, Megan Johnson, Monyya Sree Kommineni, Matt Mueller
+# 05/08/2025
+--------------------------------
+
+```{r, include=FALSE}
+# Load libraries
+library(tidyverse)
+library(tableone)
+library(knitr)       
+library(kableExtra)
+library(car)
+```
+
+
+Load in the merged dataset
+```{r}
+data <- read.csv("final_MMR_dataset.txt")
+
+# Convert categorical variables to factors
+data$Year <- factor(data$Year)
+data$Race <- factor(data$Race)
+data$Urban <- factor(data$Urban,
+                     # Reorder the levels to go from most urban to most rural
+                     levels=c(
+                       "Large Central Metro",
+                       "Large Fringe Metro",
+                       "Medium Metro",
+                       "Small Metro",
+                       "Micropolitan (Nonmetro)",
+                       "NonCore (Nonmetro)"
+                     ))
+
+# Look at summary of data
+summary(data)
+```
+
+#### Calculate descriptive statistics ####
+```{r}
+# Use CreateTableOne to generate the descriptive statistics table
+tableOne <- CreateTableOne(data=data,
+                           vars=c("Year", "Race", "Urban", "Deaths", "Births", "MMR"),
+                           factorVars = c("Year", "Race", "Urban"))
+
+# Put the table in a data frame with median and IQR for the continuous variables
+table_df <- as.data.frame(print(tableOne, nonnormal = c("Deaths", "Births", "MMR"), quote=FALSE))
+
+# Get the row names for the table
+table_df <- data.frame(Variable = rownames(table_df), 
+                               table_df, 
+                               row.names = NULL)
+
+# Use kable to make table
+table_df %>%
+  kable(format="html",
+        caption="MMR data descriptive statistics",
+        row.names=FALSE) %>%
+  kable_styling()
+```
+
+
+#### Visualize data ####
+```{r}
+# Create histogram to show distribution of MMR
+ggplot(data, aes(x=MMR)) +
+  geom_histogram(binwidth=5, fill="lightblue", color="black") +
+  theme_bw() +
+  labs(title="Distribution of MMR",
+       x="MMR (per 100,000 births)")
+```
+
+Interpretation:
+ - The histogram appears right-skewed. It is clearly not normally-distributed.
+ - MMR is <60 for most groups, with a few exceptions.
+
+
+```{r}
+# Create box plot of MMR by race
+ggplot(data, aes(x=Race, y=MMR)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(title="MMR by Race",
+       x="Race",
+       y="MMR (per 100,000 births)")
+```
+
+Interpretation:
+ - The box plots by race show MMR is higher in Black mothers than it is for Asian or White.
+ - The difference is notable, as the IQR for Black/African American does not overlap with the IQRs of the other groups.
+
+```{r}
+# Create box plot of MMR by Urban
+ggplot(data, aes(x=Urban, y=MMR)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(title="MMR by Urbanization Category",
+       x="Urbanization classification",
+       y="MMR (per 100,000 births)") +
+  theme(axis.text.x=element_text(angle=45, hjust=1))
+```
+
+Interpretation:
+ - The difference between different urbanization classifications is less notable than for race.
+ - The median MMR does increase as the groups become more rural (from left to right in this graph).
+ - This trend suggests greater mortality in mothers who reside in less urban places, possibly due to being further from medical care.
+
+```{r}
+# Create scatter plot of MMR and year, colored by race
+ggplot(data, aes(x=Year, y=MMR, color=Race)) +
+  geom_point() +
+  theme_bw() +
+  labs(title="MMR over time, colored by Race",
+       x="Year",
+       y="MMR (per 100,000 births)")
+```
+
+Interpretation:
+ - There does not appear to be an obvious difference between the years.
+ - There appears to be a possible increase in MMR in 2020 and 2021. 
+ - The coloring by Race group clearly shows again that MMR is higher in Black mothers, in all years 2018-2023.
+
+```{r}
+# Create scatter plot of MMR and year, colored by urbanization
+ggplot(data, aes(x=Year, y=MMR, color=Urban)) +
+  geom_point() +
+  theme_bw() +
+  labs(title="MMR over time, colored by Urbanization Category",
+       x="Year",
+       y="MMR (per 100,000 births)")
+```
+
+Interpretation:
+ - No clear trend is observed by coloring by Urban.
+ - This visualization does not suggest anything about the MMR and Urban over this time period.
+
+#### Statistical tests ####
+```{r, include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(car)
+library(stats)
+library(ggpubr)
+```
+
+#c. Statistical Tests, Assumptions & Alternatives
+
+ANOVA for Race
+```{r}
+# Assumptions check for ANOVA
+model_anova <- aov(MMR ~ Race, data = data)
+shapiro.test(residuals(model_anova))           # Normality
+leveneTest(MMR ~ Race, data = data)              # Equal variance (from car package)
+# If assumptions are violated
+kruskal.test(MMR ~ Race, data = data)
+```
+
+Interpretation:
+Shapiro-Wilk:
+ - Null hypothesis for Shapiro-Wilk test is that the distribution of residuals is normal.
+ - The Shapiro-Wilk test p-value of 1.54e-6 is small enough to reject the null hypothesis.
+ - The distribution of residuals is not normal, so the normality of residuals assumption for ANOVA is not met.
+Levene:
+ - Null hypothesis for Levene test is that the variance is equal across groups.
+ - The Levene test p-value of 0.0002662 is small enough to reject the null hypothesis.
+ - The variances are not equal across groups, so the equal variance assumption is not met.
+ 
+Assumptions were violated, so the alternative test (Kruskal-Wallis) will be used instead of ANOVA.
+Kruskal-Wallis results:
+ - Null hypothesis for Kruskal-Wallis test is that MMR distribution is the same across Race groups.
+ - The Kruskal-Wallis test p-value of 8.452e-13 is much smaller than 0.05, so the null hypothesis is rejected.
+ - We conclude that the median MMR is significantly different between at least two of the Race groups.
+ - Post-hoc test is warranted to determine which groups are significantly different.
+
+
+
+ANOVA for Urban
+```{r}
+# Assumptions check for ANOVA
+model_anova <- aov(MMR ~ Urban, data = data)
+shapiro.test(residuals(model_anova))           # Normality
+leveneTest(MMR ~ Urban, data = data)              # Equal variance (from car package)
+# If assumptions are violated
+kruskal.test(MMR ~ Urban, data = data)
+```
+
+Interpretation:
+Shapiro-Wilk:
+ - Null hypothesis for Shapiro-Wilk test is that the distribution of residuals is normal.
+ - The Shapiro-Wilk test p-value of 0.005389 is small enough to reject the null hypothesis.
+ - The distribution of residuals is not normal, so the normality of residuals assumption for ANOVA is not met.
+Levene:
+ - Null hypothesis for Levene test is that the variance is equal across groups.
+ - The Levene test p-value of 0.01762 is small enough to reject the null hypothesis.
+ - The variances are not equal across groups, so the equal variance assumption is not met.
+ 
+Assumptions were violated, so the alternative test (Kruskal-Wallis) will be used instead of ANOVA.
+Kruskal-Wallis results:
+ - Null hypothesis for Kruskal-Wallis test is that MMR distribution is the same across Urban groups.
+ - The Kruskal-Wallis test p-value of 0.02313 is smaller than 0.05, so the null hypothesis is rejected.
+ - We conclude that the median MMR is significantly different between at least two of the Urban groups.
+ - Post-hoc test is warranted to determine which groups are significantly different.
+
+
+Post-hoc for Race
+```{r}
+# Perform pairwise Wilcoxon rank sum test (Mann-Whitney U)
+pairwise.wilcox.test(data$MMR, data$Race, 
+                     p.adjust.method = "BH",  # Benjamini-Hochberg (FDR) correction
+                     exact = FALSE)          # Set to FALSE for larger samples
+
+```
+
+Interpretation:
+ - MMR differed significantly between Black and White (p=5.1e-12) and Black and Asian (p=5.7e-05) groups.
+ - MMR did not differ significantly between White and Asian groups (p=0.12).
+
+Post-hoc for Urban
+```{r}
+# Perform pairwise Wilcoxon rank sum test (Mann-Whitney U)
+pairwise.wilcox.test(data$MMR, data$Urban, 
+                     p.adjust.method = "BH",  # Benjamini-Hochberg (FDR) correction
+                     exact = FALSE)          # Set to FALSE for larger samples
+
+```
+
+Interpretation:
+ - Even though the Kruskal-Wallis test showed significance, pairwise comparisons between Urban groups are not significant.
+ - The differences between the nonmetro groups and the large metro groups are the closest to being significant
+
+
+Chi-Squared test to investigate associate between Race and Urban
+```{r}
+# Create contingency table
+table_result <- table(data$Race, data$Urban)
+
+# Run Chi-squared test
+chisq_result <- chisq.test(table_result)
+
+# View result
+print(chisq_result)
+
+```
+
+Interpretation:
+ - The p-value for the Chi-squared test is 0.2864, which is not significant.
+ - A warning is giving, suggesting that the assumptions for Chi-squared may not be met.
+
+
+Check chi-squared assumption
+```{r}
+chisq_result$expected
+
+```
+
+Interpretation:
+ - Many expected values are <5, so the chi-squared assumptions are not met.
+ - Should use Fisher's test as an alternative test.
+
+
+```{r}
+# If expected frequencies < 5
+fisher.test(table_result)
+```
+
+Interpretation:
+ - The Fisher's Exact Test result was not statistically significant (p=0.511).
+ - The distribution of racial groups was not significantly different across urbanization categories in this data.
+ - Racial disparities in MMR are not explained by geographic distribution alone.
+
+
+Look at standardized residuals
+```{r}
+chisq_result$stdres
+
+```
+
+Interpretation: 
+ - Even though Chi-squared assumptions were violated, we can still look at standardized residuals to get a general sense of which values deviated most from the expected.
+ - The largest residual was Asian/ Large Central Metro (residual=2.52, so more Asians than expected in Large Central Metro areas).
+ - No other pairs (Race/Urban) stand out.
+
+#d. Post-hocs & Planned Comparisons
+
+```{r}
+# Create new binary grouping variable
+data$UrbanGroup <- ifelse(grepl("Metro", data$Urban), "Urban", "Rural")
+
+# Make it a factor
+data$UrbanGroup <- factor(data$UrbanGroup)
+
+```
+
+```{r}
+table(data$UrbanGroup)
+
+```
+
+
+UrbanGroup t-test
+```{r}
+# Independent t-test
+t_test_result <- t.test(MMR ~ UrbanGroup, data = data, var.equal = FALSE)
+print(t_test_result)
+
+# 95% Confidence Interval
+t_test_result$conf.int
+```
+
+Interpretation:
+ - UrbanGroup variable compares metro and non-metro areas.
+ - Null hypothesis for the Welch's t-test is that the mean MMR is the same in Urban and Rural groups.
+ - The significant p-value (0.008708) allows us to reject the null hypothesis.
+ - The 95% confidence interval does not include 0.
+ - We conclude that MMR does differ between urban and rural areas.
+
+
+#e. Measuring effect size if there is a statistical significance
+```{r}
+library(effectsize)
+cohens_d(MMR ~ UrbanGroup, data = data)
+```
+
+Interpretation:
+ - Cohen's d of 0.86 is a large effect size (>0.8).
+ - The confidence interval does not include 0, suggesting that the effect is meaningful.
+ - We conclude that there is a large difference in MMR between urban and rural settings.
+ 
+
+#f. Specific model to run for the analysis 
+```{r}
+# General linear model
+lm_model <- lm(MMR ~ Urban + Race, data = data)
+
+# Summary of the model
+summary(lm_model)
+```
+
+Interpretation:
+ - We fit a linear model to look at the combined effect of Urban and Race on MMR.
+ - The model explained about 76.79% (R-squared) of the variance in MMR (p-value < 2.2e-16).
+ 
+
+```{r}
+# ANOVA table for the linear model
+anova(lm_model)
+
+```
+
+Interpretation:
+ - ANOVA table for the linear model showed Urban and Race were both significant predictors of MMR.
+
+#g. Additional appropriate analyses to perform
+```{r}
+# Base model with just Urban
+model_base <- lm(MMR ~ Urban, data = data)
+
+# Full model with Urban + Race + their interaction
+model_full <- lm(MMR ~ Urban * Race, data = data)
+
+```
+
+#a. Linearity (scatter plot or partial residuals):
+```{r}
+# Basic scatterplot matrix (continuous predictors only)
+pairs(data[, c("MMR", "Deaths")])
+
+```
+
+#b. Constant Variance (Homoscedasticity) using Breusch-Pagan test:
+```{r}
+library(lmtest)
+bptest(model_full)
+```
+
+Interpretation:
+ - Null hypothesis for Breusch-Pagan test is the variance of residuals is constant.
+ - p-value is not significant (0.07722), so we do not reject the null hypothesis.
+ - The assumption is not violated.
+ 
+ 
+#d. Normally Distributed Residuals:
+```{r}
+residuals <- resid(model_full)
+
+# Q-Q Plot
+qqnorm(residuals)
+qqline(residuals, col = "red", lwd = 2)
+
+
+# Shapiro-Wilk test
+shapiro.test(residuals)
+```
+
+Interpretation:
+ - The QQ-plot suggests that the residuals are not normally distributed.
+ - Null hypothesis for Shapiro-Wilk test is that residuals are normally distributed, the Shapiro-Wilk test is significant (p=4.828e-05).
+ - Reject the null hypothesis and conclude same as from QQ-plot: residuals are not normally distributed, the normality assumption for linear regression is not met.
+
+#Add Interaction Terms (Effect Modification)
+```{r}
+summary(model_full)
+```
+
+#compare models(partial f-test)
+```{r}
+anova(model_base, model_full)
+
+```
+
+Interpretation:
+ - The interaction model is highly significant (p< 2.2e-16).
+ - This means the interaction explains more variance in MMR than Urban does on its own.
+ - The relationship between location and MMR differs across race groups.
+ - However, the normality assumption for linear regression was violated, so we should be cautious about these conclusions.
